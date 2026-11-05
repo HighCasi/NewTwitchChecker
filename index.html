@@ -169,7 +169,6 @@
             return h > 0 ? `${h} Std ${m} Min` : `${m} Min`;
         }
 
-        // Präzisere Zeitberechnung für "Zuletzt online"
         function timeAgo(dateString) {
             if (!dateString) return "Unbekannt";
             const date = new Date(dateString);
@@ -185,7 +184,6 @@
             const days = Math.floor(hours / 24);
             if (days < 30) return `Vor ${days} ${days === 1 ? 'Tag' : 'Tagen'}`;
 
-            // Wenn länger her, exaktes Datum ausgeben
             return date.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
         }
 
@@ -352,7 +350,6 @@
             acc.classList.toggle('hidden');
             acc.classList.toggle('flex');
             
-            // Wenn es sich um einen Live-Streamer handelt und Chat verbunden werden muss
             const cleanName = name.replace('offline-', '');
             if (!acc.classList.contains('hidden') && !name.startsWith('offline-') && !chatSockets[cleanName]) {
                 connectChat(cleanName);
@@ -561,21 +558,17 @@
             };
         }
 
-        // Angepasst: Lädt die Top 5 Clips, sortiert nach Aktualität (neueste zuerst)
+        // Korrigiert: Lädt 100 Clips (Maximum), sortiert sie im Speicher nach Datum (neueste zuerst) und zeigt die Top 5
         async function loadClips(userId, containerIdSuffix) {
             const container = document.getElementById(`clips-${containerIdSuffix}`);
             if(container.dataset.loaded === "true") return;
             
-            container.innerHTML = '<div class="text-gray-500 text-xs text-center">Lade Clips...</div>';
+            container.innerHTML = '<div class="text-gray-500 text-xs text-center">Lade aktuellste Clips...</div>';
             
-            // Erweiterter Zeitraum (letzte 30 Tage) um genügend Clips zu finden
-            const startDate = new Date();
-            startDate.setDate(startDate.getDate() - 30);
-            
+            // Abfrage von bis zu 100 Clips, um auch wirklich die neuesten zu erwischen
             const clips = await fetchTwitchData('clips', { 
                 broadcaster_id: userId, 
-                first: 20,
-                started_at: startDate.toISOString()
+                first: 100
             });
 
             if(!clips || clips.length === 0) {
@@ -583,9 +576,9 @@
                 return;
             }
 
-            // Streng nach Erstellungsdatum sortieren: Neueste zuerst
+            // Exakte Sortierung: Neuestes Erstellungsdatum zuerst (absteigend)
             clips.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-            const top5 = clips.slice(0, 5); // Top 5 auswählen
+            const top5 = clips.slice(0, 5); // Die 5 allerneuesten herausgreifen
 
             container.innerHTML = '';
             const parentDomain = window.location.hostname || 'localhost';
