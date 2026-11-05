@@ -124,7 +124,7 @@
     <!-- Toast Notification -->
     <div id="toast" class="fixed bottom-4 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white px-6 py-3 rounded-full shadow-xl transition-opacity duration-300 opacity-0 pointer-events-none z-50 border border-gray-700 text-sm whitespace-nowrap"></div>
 
-    <script>
+     <script>
         // Sicheres Laden der Settings (Ultra Kompakt: AN, Benachrichtigungen: AUS als Standard)
         let savedSettings = JSON.parse(localStorage.getItem('twitchTrackerSettings')) || {};
         let appSettings = { 
@@ -201,7 +201,6 @@
         function saveSettings() {
             appSettings.clientId = document.getElementById('clientId').value.trim();
             
-            // Bereinigt fehlerhafte Kopien (entfernt oauth: falls aus Versehen kopiert)
             let rawToken = document.getElementById('token').value.trim();
             if (rawToken.toLowerCase().startsWith('oauth:')) {
                 rawToken = rawToken.substring(6);
@@ -267,14 +266,14 @@
                 const res = await fetch(`https://api.twitch.tv/helix/${endpoint}?${searchParams.toString()}`, { headers: getAuthHeaders() });
                 if (!res.ok) {
                     if (res.status === 401) throw new Error("AUTH_ERROR");
-                    if (res.status === 404) return null; // z.B. kein Schedule vorhanden (kein Fehler)
+                    if (res.status === 404) return null;
                     throw new Error("API_ERROR");
                 }
                 const data = await res.json();
                 return data.data;
             } catch (error) {
                 if(error.message === "AUTH_ERROR") console.warn("API 401: Token ungültig");
-                return null; // Bei Fehler null zurückgeben
+                return null;
             }
         }
 
@@ -317,10 +316,9 @@
 
             const liveStreams = await fetchTwitchData('streams', { user_login: streamers });
             
-            // Wenn liveStreams null ist, schlug die API fehl (z.B. falscher Token)
             if (!liveStreams) {
                 document.getElementById('liveStreamersList').innerHTML = '<p class="text-red-400 text-sm">API-Fehler. Token überprüfen.</p>';
-                renderErrorStreamers(streamers); // Render alle als Fehler, damit sie sichtbar bleiben!
+                renderErrorStreamers(streamers);
                 return;
             }
 
@@ -330,7 +328,18 @@
             const liveNames = liveStreams.map(s => s.user_login);
             const offlineNames = streamers.filter(s => !liveNames.includes(s.toLowerCase()));
 
-            renderLiveStreamers(liveStreams);
+            // NEU: Lädt die echten Profilbilder auch für die Live-Streamer parallel
+            let liveUsersMap = {};
+            if (liveNames.length > 0) {
+                const liveUsers = await fetchTwitchData('users', { login: liveNames });
+                if (liveUsers) {
+                    liveUsers.forEach(u => {
+                        liveUsersMap[u.login.toLowerCase()] = u.profile_image_url;
+                    });
+                }
+            }
+
+            renderLiveStreamers(liveStreams, liveUsersMap);
             renderOfflineStreamers(offlineNames);
         }
 
@@ -351,7 +360,6 @@
             refreshData();
         }
 
-        // Falls die API blockiert, zeigen wir die Streamer trotzdem als Platzhalter an
         function renderErrorStreamers(names) {
             const container = document.getElementById('offlineStreamersList');
             container.innerHTML = '';
@@ -368,7 +376,7 @@
             });
         }
 
-        function renderLiveStreamers(liveData) {
+        function renderLiveStreamers(liveData, liveUsersMap = {}) {
             const container = document.getElementById('liveStreamersList');
             container.innerHTML = '';
             
@@ -376,11 +384,14 @@
                 const isCompact = appSettings.ultraCompactMode;
                 const uptimeStr = calculateUptime(stream.started_at);
                 
+                // Holt das echte Profilbild aus der Map (Fallback auf Standard-Icon falls nicht da)
+                const profileImg = liveUsersMap[stream.user_login.toLowerCase()] || 'https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png';
+                
                 const cardHtml = isCompact 
                 ? `
                 <div class="bg-gray-800 rounded-lg border border-gray-700 hover:border-purple-500 transition-colors cursor-pointer overflow-hidden" onclick="toggleAccordion('${stream.user_name}')">
                     <div class="flex items-center px-3 py-2 gap-3">
-                        <img src="${stream.thumbnail_url.replace('{width}', '50').replace('{height}', '50')}" class="w-8 h-8 rounded-full border border-gray-600 object-cover shrink-0">
+                        <img src="${profileImg}" class="w-8 h-8 rounded-full border border-gray-600 object-cover shrink-0">
                         <div class="flex-1 min-w-0">
                             <div class="flex justify-between items-center">
                                 <span class="font-bold text-gray-100 truncate pr-2">${stream.user_name}</span>
@@ -396,7 +407,7 @@
                 : `
                 <div class="bg-gray-800 rounded-lg border border-gray-700 hover:border-purple-500 transition-colors cursor-pointer overflow-hidden" onclick="toggleAccordion('${stream.user_name}')">
                     <div class="p-4 sm:p-5 flex gap-4 items-center">
-                        <img src="${stream.thumbnail_url.replace('{width}', '80').replace('{height}', '80')}" class="w-16 h-16 sm:w-20 sm:h-20 rounded-full border-2 border-green-500 object-cover shadow-lg shrink-0">
+                        <img src="${profileImg}" class="w-16 h-16 sm:w-20 sm:h-20 rounded-full border-2 border-green-500 object-cover shadow-lg shrink-0">
                         <div class="flex-1 min-w-0">
                             <div class="flex justify-between items-start mb-1">
                                 <h3 class="font-bold text-lg sm:text-xl text-white truncate pr-2">${stream.user_name}</h3>
@@ -448,7 +459,6 @@
 
             const users = await fetchTwitchData('users', { login: offlineNames });
             
-            // Wenn die User-API blockiert, rendern wir den Error-State
             if (!users) {
                 renderErrorStreamers(offlineNames);
                 return;
@@ -554,7 +564,7 @@
             container.innerHTML = '<div class="text-gray-500 text-xs text-center">Lade...</div>';
             
             const startDate = new Date();
-            startDate.setDate(startDate.getDate() - 14); // Letzte 14 Tage
+            startDate.setDate(startDate.getDate() - 14);
             
             const clips = await fetchTwitchData('clips', { 
                 broadcaster_id: userId, 
@@ -606,7 +616,6 @@
                 localStorage.setItem('twitchTrackerStreamers', JSON.stringify(streamers));
                 input.value = '';
                 
-                // Optisch sofortiges Hinzufügen simulieren
                 renderErrorStreamers([name]); 
                 refreshData();
                 showToast(`${name} hinzugefügt!`);
@@ -625,5 +634,7 @@
             document.getElementById('liveStreamersList').innerHTML = '<p class="text-purple-400 text-sm mt-4 cursor-pointer underline" onclick="openSettings()">Bitte zuerst API-Tokens in den Einstellungen hinterlegen.</p>';
         }
     </script>
+
+
 </body>
 </html>
