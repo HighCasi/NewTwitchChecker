@@ -14,7 +14,6 @@
             100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
         }
         .live-dot { animation: pulse-green 2s infinite; }
-        /* Verhindert Pull-to-Refresh auf mobilen Browsern im Vollbild */
         body { overscroll-behavior-y: none; }
     </style>
 </head>
@@ -124,14 +123,13 @@
     <!-- Toast Notification -->
     <div id="toast" class="fixed bottom-4 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white px-6 py-3 rounded-full shadow-xl transition-opacity duration-300 opacity-0 pointer-events-none z-50 border border-gray-700 text-sm whitespace-nowrap"></div>
 
-     <script>
-        // Sicheres Laden der Settings (Ultra Kompakt: AN, Benachrichtigungen: AUS als Standard)
+    <script>
         let savedSettings = JSON.parse(localStorage.getItem('twitchTrackerSettings')) || {};
         let appSettings = { 
             clientId: savedSettings.clientId || '', 
             token: savedSettings.token || '', 
-            ultraCompactMode: savedSettings.ultraCompactMode !== false, // Standard: True
-            enableNotifications: savedSettings.enableNotifications === true // Standard: False
+            ultraCompactMode: savedSettings.ultraCompactMode !== false, 
+            enableNotifications: savedSettings.enableNotifications === true 
         };
         
         let streamers = JSON.parse(localStorage.getItem('twitchTrackerStreamers')) || [];
@@ -171,12 +169,24 @@
             return h > 0 ? `${h} Std ${m} Min` : `${m} Min`;
         }
 
+        // Präzisere Zeitberechnung für "Zuletzt online"
         function timeAgo(dateString) {
             if (!dateString) return "Unbekannt";
-            const diff = (new Date() - new Date(dateString)) / 1000;
-            if (diff < 3600) return "Vor kurzem";
-            if (diff < 86400) return `Vor ${Math.floor(diff/3600)} Stunden`;
-            return `Vor ${Math.floor(diff/86400)} Tagen`;
+            const date = new Date(dateString);
+            const diffSec = Math.floor((new Date() - date) / 1000);
+
+            if (diffSec < 60) return "Vor wenigen Sekunden";
+            const minutes = Math.floor(diffSec / 60);
+            if (minutes < 60) return `Vor ${minutes} ${minutes === 1 ? 'Minute' : 'Minuten'}`;
+            
+            const hours = Math.floor(minutes / 60);
+            if (hours < 24) return `Vor ${hours} ${hours === 1 ? 'Stunde' : 'Stunden'}`;
+            
+            const days = Math.floor(hours / 24);
+            if (days < 30) return `Vor ${days} ${days === 1 ? 'Tag' : 'Tagen'}`;
+
+            // Wenn länger her, exaktes Datum ausgeben
+            return date.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
         }
 
         function getAuthHeaders() {
@@ -200,13 +210,11 @@
 
         function saveSettings() {
             appSettings.clientId = document.getElementById('clientId').value.trim();
-            
             let rawToken = document.getElementById('token').value.trim();
             if (rawToken.toLowerCase().startsWith('oauth:')) {
                 rawToken = rawToken.substring(6);
             }
             appSettings.token = rawToken;
-
             appSettings.ultraCompactMode = document.getElementById('ultraCompactMode').checked;
             appSettings.enableNotifications = document.getElementById('enableNotifications').checked;
             
@@ -262,7 +270,6 @@
                         searchParams.append(key, params[key]);
                     }
                 }
-                
                 const res = await fetch(`https://api.twitch.tv/helix/${endpoint}?${searchParams.toString()}`, { headers: getAuthHeaders() });
                 if (!res.ok) {
                     if (res.status === 401) throw new Error("AUTH_ERROR");
@@ -278,9 +285,7 @@
         }
 
         function handleNotifications(liveData) {
-            if (!appSettings.enableNotifications) return;
-            if (Notification.permission !== "granted") return;
-
+            if (!appSettings.enableNotifications || Notification.permission !== "granted") return;
             const currentlyLive = liveData.map(s => s.user_name.toLowerCase());
             
             if (!isFirstLoad) {
@@ -328,7 +333,6 @@
             const liveNames = liveStreams.map(s => s.user_login);
             const offlineNames = streamers.filter(s => !liveNames.includes(s.toLowerCase()));
 
-            // NEU: Lädt die echten Profilbilder auch für die Live-Streamer parallel
             let liveUsersMap = {};
             if (liveNames.length > 0) {
                 const liveUsers = await fetchTwitchData('users', { login: liveNames });
@@ -348,8 +352,10 @@
             acc.classList.toggle('hidden');
             acc.classList.toggle('flex');
             
-            if (!acc.classList.contains('hidden') && !chatSockets[name]) {
-                connectChat(name);
+            // Wenn es sich um einen Live-Streamer handelt und Chat verbunden werden muss
+            const cleanName = name.replace('offline-', '');
+            if (!acc.classList.contains('hidden') && !name.startsWith('offline-') && !chatSockets[cleanName]) {
+                connectChat(cleanName);
             }
         }
 
@@ -383,8 +389,6 @@
             liveData.forEach(stream => {
                 const isCompact = appSettings.ultraCompactMode;
                 const uptimeStr = calculateUptime(stream.started_at);
-                
-                // Holt das echte Profilbild aus der Map (Fallback auf Standard-Icon falls nicht da)
                 const profileImg = liveUsersMap[stream.user_login.toLowerCase()] || 'https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png';
                 
                 const cardHtml = isCompact 
@@ -432,7 +436,7 @@
                         </div>
                         <div class="p-2 grid grid-cols-3 gap-2 border-b border-gray-800">
                             <button onclick="document.getElementById('chat-${stream.user_name}').classList.remove('hidden'); document.getElementById('clips-${stream.user_name}').classList.add('hidden'); document.getElementById('stream-${stream.user_name}').classList.add('hidden'); event.stopPropagation();" class="text-xs bg-gray-800 hover:bg-gray-700 py-2 rounded font-medium">Live Chat</button>
-                            <button onclick="document.getElementById('clips-${stream.user_name}').classList.remove('hidden'); document.getElementById('chat-${stream.user_name}').classList.add('hidden'); document.getElementById('stream-${stream.user_name}').classList.add('hidden'); loadClips('${stream.user_id}', '${stream.user_name}'); event.stopPropagation();" class="text-xs bg-gray-800 hover:bg-gray-700 py-2 rounded font-medium">Clips</button>
+                            <button onclick="document.getElementById('clips-${stream.user_name}').classList.remove('hidden'); document.getElementById('chat-${stream.user_name}').classList.add('hidden'); document.getElementById('stream-${stream.user_name}').classList.add('hidden'); loadClips('${stream.user_id}', '${stream.user_name}'); event.stopPropagation();" class="text-xs bg-gray-800 hover:bg-gray-700 py-2 rounded font-medium">Top 5 Clips</button>
                             <button onclick="document.getElementById('stream-${stream.user_name}').classList.remove('hidden'); document.getElementById('chat-${stream.user_name}').classList.add('hidden'); document.getElementById('clips-${stream.user_name}').classList.add('hidden'); loadStream('${stream.user_name}'); event.stopPropagation();" class="text-xs bg-gray-800 hover:bg-gray-700 py-2 rounded font-medium text-purple-400">Watch</button>
                         </div>
                         <div id="chat-${stream.user_name}" class="h-48 overflow-y-auto p-3 text-sm flex flex-col gap-1 chat-box" onclick="event.stopPropagation()">
@@ -512,7 +516,7 @@
                 const accordionHtml = `
                     <div id="accordion-offline-${user.login}" class="hidden flex-col bg-gray-900 border-t border-gray-700">
                         <div class="p-2 border-b border-gray-800">
-                            <button onclick="loadClips('${user.id}', 'offline-${user.login}'); event.stopPropagation();" class="w-full text-xs bg-gray-800 hover:bg-gray-700 py-2 rounded font-medium">Aktuellste Clips laden</button>
+                            <button onclick="loadClips('${user.id}', 'offline-${user.login}'); event.stopPropagation();" class="w-full text-xs bg-gray-800 hover:bg-gray-700 py-2 rounded font-medium">Top 5 Clips laden</button>
                         </div>
                         <div id="clips-offline-${user.login}" class="p-3 flex flex-col gap-3" onclick="event.stopPropagation()"></div>
                     </div>
@@ -557,14 +561,16 @@
             };
         }
 
+        // Angepasst: Lädt die Top 5 Clips, sortiert nach Aktualität (neueste zuerst)
         async function loadClips(userId, containerIdSuffix) {
             const container = document.getElementById(`clips-${containerIdSuffix}`);
             if(container.dataset.loaded === "true") return;
             
-            container.innerHTML = '<div class="text-gray-500 text-xs text-center">Lade...</div>';
+            container.innerHTML = '<div class="text-gray-500 text-xs text-center">Lade Clips...</div>';
             
+            // Erweiterter Zeitraum (letzte 30 Tage) um genügend Clips zu finden
             const startDate = new Date();
-            startDate.setDate(startDate.getDate() - 14);
+            startDate.setDate(startDate.getDate() - 30);
             
             const clips = await fetchTwitchData('clips', { 
                 broadcaster_id: userId, 
@@ -573,23 +579,27 @@
             });
 
             if(!clips || clips.length === 0) {
-                container.innerHTML = '<div class="text-gray-500 text-xs text-center">Keine neuen Clips gefunden.</div>';
+                container.innerHTML = '<div class="text-gray-500 text-xs text-center">Keine Clips gefunden.</div>';
                 return;
             }
 
+            // Streng nach Erstellungsdatum sortieren: Neueste zuerst
             clips.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-            const top3 = clips.slice(0, 3);
+            const top5 = clips.slice(0, 5); // Top 5 auswählen
 
             container.innerHTML = '';
             const parentDomain = window.location.hostname || 'localhost';
 
-            top3.forEach(clip => {
+            top5.forEach(clip => {
                 const embedUrl = `${clip.embed_url}&parent=${parentDomain}&autoplay=false`;
                 container.insertAdjacentHTML('beforeend', `
                     <div class="bg-gray-800 rounded overflow-hidden border border-gray-700">
-                        <div class="px-2 py-1 text-[11px] text-gray-300 truncate font-medium flex justify-between">
+                        <div class="px-2 py-1 text-[11px] text-gray-300 font-medium flex justify-between items-center">
                             <span class="truncate pr-2">${clip.title}</span>
-                            <span class="text-purple-400 font-bold shrink-0">${clip.view_count} 👀</span>
+                            <div class="flex items-center gap-2 shrink-0">
+                                <span class="text-[10px] text-gray-400">${timeAgo(clip.created_at)}</span>
+                                <span class="text-purple-400 font-bold">${clip.view_count} 👀</span>
+                            </div>
                         </div>
                         <iframe src="${embedUrl}" class="w-full aspect-video border-t border-gray-700" allowfullscreen></iframe>
                     </div>
@@ -634,7 +644,5 @@
             document.getElementById('liveStreamersList').innerHTML = '<p class="text-purple-400 text-sm mt-4 cursor-pointer underline" onclick="openSettings()">Bitte zuerst API-Tokens in den Einstellungen hinterlegen.</p>';
         }
     </script>
-
-
 </body>
 </html>
