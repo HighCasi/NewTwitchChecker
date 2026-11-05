@@ -562,33 +562,26 @@
             const container = document.getElementById(`clips-${containerIdSuffix}`);
             if(container.dataset.loaded === "true") return;
             
-            container.innerHTML = '<div class="text-gray-500 text-xs text-center">Lade neueste Clips...</div>';
+            container.innerHTML = '<div class="text-gray-500 text-xs text-center">Lade neueste Clips der letzten 7 Tage...</div>';
             
+            // Exakt auf die letzten 7 Tage einschränken
             const startDate = new Date();
-            startDate.setDate(startDate.getDate() - 30);
+            startDate.setDate(startDate.getDate() - 7);
             
-            let clips = await fetchTwitchData('clips', { 
+            const clips = await fetchTwitchData('clips', { 
                 broadcaster_id: userId, 
                 first: 20,
                 started_at: startDate.toISOString()
             });
 
-            if (!clips || clips.length === 0) {
-                startDate.setDate(startDate.getDate() - 60);
-                clips = await fetchTwitchData('clips', { 
-                    broadcaster_id: userId, 
-                    first: 20,
-                    started_at: startDate.toISOString()
-                });
-            }
-
             if(!clips || clips.length === 0) {
-                container.innerHTML = '<div class="text-gray-500 text-xs text-center">Keine Clips gefunden.</div>';
+                container.innerHTML = '<div class="text-gray-500 text-xs text-center">Keine Clips in den letzten 7 Tagen gefunden.</div>';
                 return;
             }
 
+            // Streng nach Datum sortieren: Das allerneueste (jüngste) nach oben
             clips.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-            const top5 = clips.slice(0, 5);
+            const top5 = clips.slice(0, 5); // Die Top 5 davon anzeigen
 
             container.innerHTML = '';
             const parentDomain = window.location.hostname || 'localhost';
@@ -610,6 +603,7 @@
             });
             container.dataset.loaded = "true";
         }
+
 
         function loadStream(channel) {
             const container = document.getElementById(`stream-${channel}`);
