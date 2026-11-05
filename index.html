@@ -440,7 +440,7 @@
                             <div class="text-gray-500 text-xs text-center italic">Verbinde zum Chat...</div>
                         </div>
                         <div id="clips-${stream.user_name}" class="hidden p-3 flex flex-col gap-3" onclick="event.stopPropagation()">
-                            <div class="text-gray-500 text-xs text-center">Lade aktuellste Clips...</div>
+                            <div class="text-gray-500 text-xs text-center">Lade neueste Clips...</div>
                         </div>
                         <div id="stream-${stream.user_name}" class="hidden p-0 bg-black aspect-video relative" onclick="event.stopPropagation()">
                             <div class="absolute inset-0 flex items-center justify-center text-gray-500 text-sm">Wird geladen...</div>
@@ -558,27 +558,37 @@
             };
         }
 
-        // Korrigiert: Lädt 100 Clips (Maximum), sortiert sie im Speicher nach Datum (neueste zuerst) und zeigt die Top 5
         async function loadClips(userId, containerIdSuffix) {
             const container = document.getElementById(`clips-${containerIdSuffix}`);
             if(container.dataset.loaded === "true") return;
             
-            container.innerHTML = '<div class="text-gray-500 text-xs text-center">Lade aktuellste Clips...</div>';
+            container.innerHTML = '<div class="text-gray-500 text-xs text-center">Lade neueste Clips...</div>';
             
-            // Abfrage von bis zu 100 Clips, um auch wirklich die neuesten zu erwischen
-            const clips = await fetchTwitchData('clips', { 
+            const startDate = new Date();
+            startDate.setDate(startDate.getDate() - 30);
+            
+            let clips = await fetchTwitchData('clips', { 
                 broadcaster_id: userId, 
-                first: 100
+                first: 20,
+                started_at: startDate.toISOString()
             });
+
+            if (!clips || clips.length === 0) {
+                startDate.setDate(startDate.getDate() - 60);
+                clips = await fetchTwitchData('clips', { 
+                    broadcaster_id: userId, 
+                    first: 20,
+                    started_at: startDate.toISOString()
+                });
+            }
 
             if(!clips || clips.length === 0) {
                 container.innerHTML = '<div class="text-gray-500 text-xs text-center">Keine Clips gefunden.</div>';
                 return;
             }
 
-            // Exakte Sortierung: Neuestes Erstellungsdatum zuerst (absteigend)
             clips.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-            const top5 = clips.slice(0, 5); // Die 5 allerneuesten herausgreifen
+            const top5 = clips.slice(0, 5);
 
             container.innerHTML = '';
             const parentDomain = window.location.hostname || 'localhost';
