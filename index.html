@@ -160,6 +160,16 @@
             setTimeout(() => toast.classList.add('opacity-0'), 3000);
         }
 
+        // Hilfsfunktion: Twitch VOD Dauer (z.B. 1h30m) in Sekunden umrechnen
+        function parseTwitchDuration(duration) {
+            if (!duration) return 0;
+            let match = duration.match(/(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?/);
+            let hours = parseInt(match[1]) || 0;
+            let minutes = parseInt(match[2]) || 0;
+            let seconds = parseInt(match[3]) || 0;
+            return (hours * 3600) + (minutes * 60) + seconds;
+        }
+
         function calculateUptime(startedAt) {
             if (!startedAt) return '';
             const start = new Date(startedAt).getTime();
@@ -169,12 +179,15 @@
             return h > 0 ? `${h} Std ${m} Min` : `${m} Min`;
         }
 
+        // Aktualisierte TimeAgo-Funktion (verhindert negative Zeiten)
         function timeAgo(dateString) {
             if (!dateString) return "Unbekannt";
             const date = new Date(dateString);
-            const diffSec = Math.floor((new Date() - date) / 1000);
+            let diffSec = Math.floor((new Date() - date) / 1000);
 
-            if (diffSec < 60) return "Vor wenigen Sekunden";
+            if (diffSec < 0) diffSec = 0; // Verhindert negative Zeiten
+
+            if (diffSec < 60) return "Gerade eben";
             const minutes = Math.floor(diffSec / 60);
             if (minutes < 60) return `Vor ${minutes} ${minutes === 1 ? 'Minute' : 'Minuten'}`;
             
@@ -399,6 +412,8 @@
                                 <div class="flex items-center gap-2 shrink-0">
                                     <span class="text-xs font-semibold text-red-400 bg-red-400/10 px-1.5 py-0.5 rounded">${stream.viewer_count.toLocaleString()}</span>
                                     <span class="w-2 h-2 rounded-full bg-green-500 live-dot shrink-0"></span>
+                                    <!-- Lösch-Button für Kompaktansicht -->
+                                    <button onclick="removeStreamer('${stream.user_name}', event)" class="text-gray-500 hover:text-red-400 p-1 ml-1 shrink-0"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
                                 </div>
                             </div>
                             <div class="text-[11px] text-gray-400 truncate mt-0.5">${stream.title}</div>
@@ -469,7 +484,35 @@
                 const videos = await fetchTwitchData('videos', { user_id: user.id, type: 'archive', first: 1 });
                 const schedule = await fetchTwitchData('schedule', { broadcaster_id: user.id });
                 
-                const lastOnline = videos && videos.length > 0 ? timeAgo(videos[0].created_at) : 'Unbekannt';
+                let lastOnlineTimestamp = 0;
+
+                // 1. Methode: Ende des letzten VODs berechnen
+                if (videos && videos.length > 0) {
+                    const vod = videos[0];
+                    const startTime = new Date(vod.created_at).getTime();
+                    const durationSec = parseTwitchDuration(vod.duration);
+                    lastOnlineTimestamp = startTime + (durationSec * 1000);
+                }
+
+                // 2. Methode: Neuesten Clip der letzten 7 Tage prüfen
+                const clipStartDate = new Date();
+                clipStartDate.setDate(clipStartDate.getDate() - 7);
+                const clips = await fetchTwitchData('clips', { 
+                    broadcaster_id: user.id, 
+                    first: 50, 
+                    started_at: clipStartDate.toISOString() 
+                });
+
+                if (clips && clips.length > 0) {
+                    clips.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                    const newestClipTime = new Date(clips[0].created_at).getTime();
+                    
+                    if (newestClipTime > lastOnlineTimestamp) {
+                        lastOnlineTimestamp = newestClipTime;
+                    }
+                }
+
+                const lastOnline = lastOnlineTimestamp > 0 ? timeAgo(new Date(lastOnlineTimestamp).toISOString()) : 'Unbekannt';
                 
                 let scheduleText = '';
                 if (schedule && schedule.segments && schedule.segments.length > 0) {
@@ -493,6 +536,7 @@
                             </div>
                             ${scheduleText ? `<div class="text-[11px] text-purple-400 mt-0.5 truncate">${scheduleText}</div>` : ''}
                         </div>
+                        <button onclick="removeStreamer('${user.login}', event)" class="text-gray-600 hover:text-red-400 p-1 ml-1 shrink-0"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
                     </div>
                 `
                 : `
@@ -558,19 +602,19 @@
             };
         }
 
+        // Clips abfragen - fest auf 7 Tage und neueste zuerst limitiert
         async function loadClips(userId, containerIdSuffix) {
             const container = document.getElementById(`clips-${containerIdSuffix}`);
             if(container.dataset.loaded === "true") return;
             
             container.innerHTML = '<div class="text-gray-500 text-xs text-center">Lade neueste Clips der letzten 7 Tage...</div>';
             
-            // Exakt auf die letzten 7 Tage einschränken
             const startDate = new Date();
             startDate.setDate(startDate.getDate() - 7);
             
             const clips = await fetchTwitchData('clips', { 
                 broadcaster_id: userId, 
-                first: 20,
+                first: 100, // Erhöhtes Limit, um sicher alle jüngsten Clips einzufangen
                 started_at: startDate.toISOString()
             });
 
@@ -579,9 +623,9 @@
                 return;
             }
 
-            // Streng nach Datum sortieren: Das allerneueste (jüngste) nach oben
+            // Strikt nach Datum absteigend sortieren
             clips.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-            const top5 = clips.slice(0, 5); // Die Top 5 davon anzeigen
+            const top5 = clips.slice(0, 5);
 
             container.innerHTML = '';
             const parentDomain = window.location.hostname || 'localhost';
@@ -603,7 +647,6 @@
             });
             container.dataset.loaded = "true";
         }
-
 
         function loadStream(channel) {
             const container = document.getElementById(`stream-${channel}`);
